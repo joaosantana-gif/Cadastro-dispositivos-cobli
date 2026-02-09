@@ -7,7 +7,7 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRirnHsHNFNULPC-fq3
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="Cadastro de Dispositivos - Cobli", 
+    page_title="Gerenciador de Dispositivos - Cobli", 
     page_icon="🚚", 
     layout="centered"
 )
@@ -16,13 +16,13 @@ st.set_page_config(
 try:
     st.image("logo.png", width=180) 
 except:
-    st.info("💡 Carregando sem logo local.")
+    pass # Se não houver logo, o app segue normalmente
 
 st.title("Gerenciador de Dispositivos - Cobli")
 st.caption("Automação de Associações e Desassociações via API")
 st.divider()
 
-# --- 3. MEMÓRIA E BARRA LATERAL ---
+# --- 3. ESTADO DA SESSÃO E BARRA LATERAL ---
 if 'dados_planilha' not in st.session_state:
     st.session_state.dados_planilha = None
 
@@ -34,7 +34,7 @@ if st.sidebar.button("🗑️ Limpar Sessão"):
     st.session_state.dados_planilha = None
     st.rerun()
 
-# --- 4. SINCRONIZAÇÃO DE DADOS ---
+# --- 4. CARREGAMENTO DE DADOS ---
 if st.button("🔄 Sincronizar Planilha Google", use_container_width=True, type="secondary"): 
     with st.spinner("Buscando dados na nuvem..."):
         try:
@@ -43,19 +43,19 @@ if st.button("🔄 Sincronizar Planilha Google", use_container_width=True, type=
         except Exception as e:
             st.error(f"Erro ao acessar planilha: {e}")
 
-# --- 5. INTERFACE PRINCIPAL (ABAS RENOMEADAS) ---
+# --- 5. INTERFACE PRINCIPAL ---
 if st.session_state.dados_planilha is not None:
     df = st.session_state.dados_planilha
     st.write(f"### Dispositivos na Planilha ({len(df)})")
     st.dataframe(df, use_container_width=True, hide_index=True) 
 
-    # Abas atualizadas conforme sua solicitação
+    # ABAS RENOMEADAS
     tab1, tab2 = st.tabs(["🔗 Associar dispositivo", "🔓 Desassociar dispositivo"])
 
     # --- ABA 1: ASSOCIAR DISPOSITIVO ---
     with tab1:
         st.markdown("Vincula os dispositivos aos veículos e frotas configurados.")
-        if st.button("🚀 INICIAR ASSOCIAÇÃO", use_container_width=True, type="primary"):
+        if st.button("🚀 INICIAR ASSOCIAÇÃO EM MASSA", use_container_width=True, type="primary"):
             if not email or not password:
                 st.error("Preencha o acesso na lateral.")
             else:
@@ -68,7 +68,7 @@ if st.session_state.dados_planilha is not None:
                     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
                     
                     sucesso, falha = 0, 0
-                    logs_erro = [] # Lista para armazenar erros detalhados
+                    logs = []
                     progress = st.progress(0)
                     
                     for idx, row in df.iterrows():
@@ -83,24 +83,23 @@ if st.session_state.dados_planilha is not None:
                             sucesso += 1
                         else:
                             falha += 1
-                            logs_erro.append({"IMEI": row['imei'], "Status": r.status_code, "Mensagem": r.text})
+                            logs.append({"IMEI": row['imei'], "Status": r.status_code, "Resposta": r.text})
                         
                         progress.progress((idx + 1) / len(df))
                         
                     st.divider()
-                    st.success(f"Processo finalizado: {sucesso} Sucessos | {falha} Falhas")
-                    
-                    # Exibição do Log de Erros Detalhado
-                    if logs_erro:
-                        with st.expander("🔍 Ver Log de Erros Detalhado"):
-                            st.table(pd.DataFrame(logs_erro))
+                    st.success(f"Finalizado: {sucesso} Sucessos | {falha} Falhas")
+                    if logs:
+                        with st.expander("🔍 Ver detalhes das falhas"):
+                            st.table(pd.DataFrame(logs))
                 else:
                     st.error("Credenciais inválidas.")
 
     # --- ABA 2: DESASSOCIAR DISPOSITIVO ---
     with tab2:
-        st.warning("⚠️ Esta ação removerá o rastreador do painel")
-        if st.button("⚠️ CONFIRMAR DESASSOCIAÇÃO", use_container_width=True):
+        # AVISO SIMPLIFICADO
+        st.warning("⚠️ Esta ação removerá o rastreador do painel") 
+        if st.button("⚠️ CONFIRMAR DESASSOCIAÇÃO EM MASSA", use_container_width=True):
             if not email or not password:
                 st.error("Preencha o acesso na lateral.")
             else:
@@ -112,10 +111,11 @@ if st.session_state.dados_planilha is not None:
                     headers = {'Authorization': f'Bearer {token}'}
                     
                     sucesso, falha = 0, 0
-                    logs_erro = []
+                    logs = []
                     progress = st.progress(0)
                     
                     for idx, row in df.iterrows():
+                        # Usamos o ID da planilha para desassociar
                         device_id = str(row['id'])
                         del_url = f'https://api.cobli.co/v1/device-vehicle-association/{device_id}'
                         
@@ -125,15 +125,14 @@ if st.session_state.dados_planilha is not None:
                             sucesso += 1
                         else:
                             falha += 1
-                            logs_erro.append({"ID": device_id, "IMEI": row['imei'], "Status": r.status_code, "Mensagem": r.text})
+                            logs.append({"ID": device_id, "Status": r.status_code, "Resposta": r.text})
                             
                         progress.progress((idx + 1) / len(df))
                     
                     st.divider()
-                    st.success(f"Desassociação finalizada: {sucesso} Sucessos | {falha} Falhas")
-                    
-                    if logs_erro:
-                        with st.expander("🔍 Ver Log de Erros Detalhado"):
-                            st.table(pd.DataFrame(logs_erro))
+                    st.success(f"Finalizado: {sucesso} Removidos | {falha} Falhas")
+                    if logs:
+                        with st.expander("🔍 Ver detalhes das falhas"):
+                            st.table(pd.DataFrame(logs))
                 else:
                     st.error("Credenciais inválidas.")
