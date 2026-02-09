@@ -2,20 +2,24 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# URL da sua planilha Google
+# URL da sua planilha Google publicada como CSV
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRirnHsHNFNULPC-fq3JyULMJT0ImV4f6ojJwblaL2CxeKQf7erAoGwCYF7hce8hiDB68WqD_9QcLcM/pub?output=csv"
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Cadastro de Dispositivos - Cobli", page_icon="🚚", layout="centered")
+st.set_page_config(
+    page_title="Cadastro de Dispositivos - Cobli", 
+    page_icon="🚚", 
+    layout="centered"
+)
 
 # --- 2. LOGO E TÍTULO ---
 try:
-    st.image("logo.png", width=180)
+    st.image("logo.png", width=180) 
 except:
     st.info("💡 Carregando sem logo local.")
 
-st.title("Cadastro de Dispositivos - Cobli")
-st.caption("Gerenciamento de Ativos e Associações via API")
+st.title("Gerenciador de Dispositivos - Cobli")
+st.caption("Automação de Associações e Desassociações via API")
 st.divider()
 
 # --- 3. MEMÓRIA E BARRA LATERAL ---
@@ -31,7 +35,7 @@ if st.sidebar.button("🗑️ Limpar Sessão"):
     st.rerun()
 
 # --- 4. SINCRONIZAÇÃO DE DADOS ---
-if st.button("🔄 Sincronizar Planilha Google", use_container_width=True, type="secondary"):
+if st.button("🔄 Sincronizar Planilha Google", use_container_width=True, type="secondary"): 
     with st.spinner("Buscando dados na nuvem..."):
         try:
             st.session_state.dados_planilha = pd.read_csv(SHEET_URL)
@@ -39,22 +43,22 @@ if st.button("🔄 Sincronizar Planilha Google", use_container_width=True, type=
         except Exception as e:
             st.error(f"Erro ao acessar planilha: {e}")
 
-# --- 5. INTERFACE PRINCIPAL (ABAS) ---
+# --- 5. INTERFACE PRINCIPAL (ABAS RENOMEADAS) ---
 if st.session_state.dados_planilha is not None:
     df = st.session_state.dados_planilha
-    st.write(f"### Dispositivos Detectados ({len(df)})")
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.write(f"### Dispositivos na Planilha ({len(df)})")
+    st.dataframe(df, use_container_width=True, hide_index=True) 
 
-    tab1, tab2 = st.tabs(["🚀 Cadastro em Massa", "🗑️ Desassociar Veículos"])
+    # Abas atualizadas conforme sua solicitação
+    tab1, tab2 = st.tabs(["🔗 Associar dispositivo", "🔓 Desassociar dispositivo"])
 
-    # --- ABA 1: CADASTRO ---
+    # --- ABA 1: ASSOCIAR DISPOSITIVO ---
     with tab1:
-        st.markdown("Esta ação associa os dispositivos às frotas e veículos configurados na planilha.")
-        if st.button("🚀 INICIAR IMPORTAÇÃO", use_container_width=True, type="primary"):
+        st.markdown("Vincula os dispositivos aos veículos e frotas configurados.")
+        if st.button("🚀 INICIAR ASSOCIAÇÃO", use_container_width=True, type="primary"):
             if not email or not password:
-                st.error("Preencha o e-mail e a senha na lateral.")
+                st.error("Preencha o acesso na lateral.")
             else:
-                # Autenticação
                 auth_url = 'https://api.cobli.co/herbie-1.1/account/authenticate'
                 res_auth = requests.post(auth_url, json={"email": email, "password": password})
                 
@@ -64,7 +68,9 @@ if st.session_state.dados_planilha is not None:
                     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
                     
                     sucesso, falha = 0, 0
+                    logs_erro = [] # Lista para armazenar erros detalhados
                     progress = st.progress(0)
+                    
                     for idx, row in df.iterrows():
                         payload = [{
                             "id": str(row['id']), "imei": str(row['imei']),
@@ -73,21 +79,31 @@ if st.session_state.dados_planilha is not None:
                             "chip_operator": str(row['chip_operator']), "fleet_id": str(row['fleet_id'])
                         }]
                         r = requests.post(import_url, json=payload, headers=headers)
-                        if r.status_code in [200, 201]: sucesso += 1
-                        else: falha += 1
+                        if r.status_code in [200, 201]:
+                            sucesso += 1
+                        else:
+                            falha += 1
+                            logs_erro.append({"IMEI": row['imei'], "Status": r.status_code, "Mensagem": r.text})
+                        
                         progress.progress((idx + 1) / len(df))
-                    st.success(f"Cadastro Concluído! ✅ {sucesso} Sucessos | ❌ {falha} Falhas")
+                        
+                    st.divider()
+                    st.success(f"Processo finalizado: {sucesso} Sucessos | {falha} Falhas")
+                    
+                    # Exibição do Log de Erros Detalhado
+                    if logs_erro:
+                        with st.expander("🔍 Ver Log de Erros Detalhado"):
+                            st.table(pd.DataFrame(logs_erro))
                 else:
                     st.error("Credenciais inválidas.")
 
-    # --- ABA 2: DESASSOCIAÇÃO ---
+    # --- ABA 2: DESASSOCIAR DISPOSITIVO ---
     with tab2:
-        st.warning("⚠️ Esta ação removerá o rastreador do veículo no painel, mas ele continuará sendo um ativo da frota.")
+        st.warning("⚠️ Esta ação removerá o rastreador do painel")
         if st.button("⚠️ CONFIRMAR DESASSOCIAÇÃO", use_container_width=True):
             if not email or not password:
-                st.error("Preencha o e-mail e a senha na lateral.")
+                st.error("Preencha o acesso na lateral.")
             else:
-                # Autenticação
                 auth_url = 'https://api.cobli.co/herbie-1.1/account/authenticate'
                 res_auth = requests.post(auth_url, json={"email": email, "password": password})
                 
@@ -96,9 +112,10 @@ if st.session_state.dados_planilha is not None:
                     headers = {'Authorization': f'Bearer {token}'}
                     
                     sucesso, falha = 0, 0
+                    logs_erro = []
                     progress = st.progress(0)
+                    
                     for idx, row in df.iterrows():
-                        # Endpoint para remover o vínculo dispositivo-veículo
                         device_id = str(row['id'])
                         del_url = f'https://api.cobli.co/v1/device-vehicle-association/{device_id}'
                         
@@ -108,8 +125,15 @@ if st.session_state.dados_planilha is not None:
                             sucesso += 1
                         else:
                             falha += 1
+                            logs_erro.append({"ID": device_id, "IMEI": row['imei'], "Status": r.status_code, "Mensagem": r.text})
+                            
                         progress.progress((idx + 1) / len(df))
                     
-                    st.success(f"Desassociação Concluída! ✅ {sucesso} Removidos | ❌ {falha} Falhas")
+                    st.divider()
+                    st.success(f"Desassociação finalizada: {sucesso} Sucessos | {falha} Falhas")
+                    
+                    if logs_erro:
+                        with st.expander("🔍 Ver Log de Erros Detalhado"):
+                            st.table(pd.DataFrame(logs_erro))
                 else:
                     st.error("Credenciais inválidas.")
