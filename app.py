@@ -16,7 +16,7 @@ st.set_page_config(
 try:
     st.image("logo.png", width=180) 
 except:
-    pass # Se não houver logo, o app segue normalmente
+    pass
 
 st.title("Gerenciador de Dispositivos - Cobli")
 st.caption("Automação de Associações e Desassociações via API")
@@ -26,7 +26,7 @@ st.divider()
 if 'dados_planilha' not in st.session_state:
     st.session_state.dados_planilha = None
 
-st.sidebar.header("🔑 Acesso Cobli")
+st.sidebar.header("🔑 Acesso Cobli") #
 email = st.sidebar.text_input("E-mail corporativo", placeholder="seu.nome@cobli.co").strip()
 password = st.sidebar.text_input("Senha API", type="password").strip()
 
@@ -43,13 +43,13 @@ if st.button("🔄 Sincronizar Planilha Google", use_container_width=True, type=
         except Exception as e:
             st.error(f"Erro ao acessar planilha: {e}")
 
-# --- 5. INTERFACE PRINCIPAL ---
+# --- 5. INTERFACE PRINCIPAL (ABAS ATUALIZADAS) ---
 if st.session_state.dados_planilha is not None:
     df = st.session_state.dados_planilha
     st.write(f"### Dispositivos na Planilha ({len(df)})")
     st.dataframe(df, use_container_width=True, hide_index=True) 
 
-    # ABAS RENOMEADAS
+    # Nomes das abas atualizados
     tab1, tab2 = st.tabs(["🔗 Associar dispositivo", "🔓 Desassociar dispositivo"])
 
     # --- ABA 1: ASSOCIAR DISPOSITIVO ---
@@ -97,7 +97,7 @@ if st.session_state.dados_planilha is not None:
 
     # --- ABA 2: DESASSOCIAR DISPOSITIVO ---
     with tab2:
-        # AVISO SIMPLIFICADO
+        # Aviso simplificado conforme solicitado
         st.warning("⚠️ Esta ação removerá o rastreador do painel") 
         if st.button("⚠️ CONFIRMAR DESASSOCIAÇÃO EM MASSA", use_container_width=True):
             if not email or not password:
@@ -108,31 +108,40 @@ if st.session_state.dados_planilha is not None:
                 
                 if res_auth.status_code == 200:
                     token = res_auth.json().get("authentication_token")
-                    headers = {'Authorization': f'Bearer {token}'}
+                    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
                     
                     sucesso, falha = 0, 0
                     logs = []
                     progress = st.progress(0)
                     
                     for idx, row in df.iterrows():
-                        # Usamos o ID da planilha para desassociar
+                        # Tentativa B: Usando PATCH para desvincular o veículo do dispositivo
                         device_id = str(row['id'])
-                        del_url = f'https://api.cobli.co/v1/device-vehicle-association/{device_id}'
+                        patch_url = f'https://api.cobli.co/v1/device-vehicle-association/{device_id}'
                         
-                        r = requests.delete(del_url, headers=headers)
+                        # Payload enviando vehicle_id como nulo (vazio)
+                        payload = {"vehicle_id": None}
+                        
+                        r = requests.patch(patch_url, json=payload, headers=headers)
                         
                         if r.status_code in [200, 204]:
                             sucesso += 1
                         else:
                             falha += 1
-                            logs.append({"ID": device_id, "Status": r.status_code, "Resposta": r.text})
+                            # O log detalhado capturará se o erro 403 persiste
+                            logs.append({
+                                "ID": device_id, 
+                                "IMEI": row['imei'],
+                                "Status": r.status_code, 
+                                "Resposta API": r.text
+                            })
                             
                         progress.progress((idx + 1) / len(df))
                     
                     st.divider()
-                    st.success(f"Finalizado: {sucesso} Removidos | {falha} Falhas")
+                    st.success(f"Finalizado: {sucesso} Sucessos | {falha} Falhas")
                     if logs:
-                        with st.expander("🔍 Ver detalhes das falhas"):
-                            st.table(pd.DataFrame(logs))
+                        with st.expander("🔍 Ver Log de Erros Detalhado"):
+                            st.table(pd.DataFrame(logs)) #
                 else:
                     st.error("Credenciais inválidas.")
