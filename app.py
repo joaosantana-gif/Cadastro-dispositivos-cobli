@@ -49,19 +49,19 @@ if st.session_state.dados_planilha is not None:
     st.write(f"### Dispositivos na Planilha ({len(df)})")
     st.dataframe(df, use_container_width=True, hide_index=True) 
 
+    # ABAS ATUALIZADAS
     tab1, tab2 = st.tabs(["🔗 Associar dispositivo", "🔓 Desassociar dispositivo"])
 
     # --- ABA 1: ASSOCIAR DISPOSITIVO ---
     with tab1:
         st.markdown("Vincula os dispositivos aos veículos e frotas configurados.")
-        container_assoc = st.container() # Para evitar o pulo de página
+        container_assoc = st.container() 
         
         if st.button("🚀 INICIAR ASSOCIAÇÃO EM MASSA", use_container_width=True, type="primary"):
             if not email or not password:
                 st.error("Preencha a senha na lateral.")
             else:
                 with st.status("Processando associações...", expanded=True) as status:
-                    # Autenticação
                     auth_url = 'https://api.cobli.co/herbie-1.1/account/authenticate'
                     res_auth = requests.post(auth_url, json={"email": email, "password": password})
                     
@@ -92,20 +92,22 @@ if st.session_state.dados_planilha is not None:
                             if sucesso > 0: st.success(f"✅ {sucesso} dispositivos associados!")
                             if falha > 0:
                                 st.error(f"❌ {falha} falhas detectadas.")
-                                st.expander("🔍 Ver Logs de Erro").table(pd.DataFrame(logs))
+                                with st.expander("🔍 Ver Logs de Erro"):
+                                    st.table(pd.DataFrame(logs))
                     else:
                         st.error("Erro de autenticação.")
 
     # --- ABA 2: DESASSOCIAR DISPOSITIVO ---
     with tab2:
-        st.warning("⚠️ Esta ação removerá o rastreador do painel")
+        # AVISO SIMPLIFICADO
+        st.warning("⚠️ Esta ação removerá o rastreador do painel") 
         container_desassoc = st.container()
 
         if st.button("⚠️ CONFIRMAR DESASSOCIAÇÃO EM MASSA", use_container_width=True):
             if not email or not password:
                 st.error("Preencha a senha na lateral.")
             else:
-                with st.status("Executando desassociações...", expanded=True) as status:
+                with st.status("Executando desasociações...", expanded=True) as status:
                     # Autenticação
                     auth_url = 'https://api.cobli.co/herbie-1.1/account/authenticate'
                     res_auth = requests.post(auth_url, json={"email": email, "password": password})
@@ -114,12 +116,12 @@ if st.session_state.dados_planilha is not None:
                         token = res_auth.json().get("authentication_token")
                         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
                         
-                        sucesso, falha, logs = 0, 0, []
+                        sucesso, falha, logs_lista = 0, 0, []
 
                         for idx, row in df.iterrows():
-                            # Tentativa via PATCH para desvincular
-                            device_id = str(row['id'])
-                            url = f'https://api.cobli.co/v1/device-vehicle-association/{device_id}'
+                            # Tentativa via PATCH para desvincular o veículo do dispositivo
+                            device_identifier = str(row['id'])
+                            url = f'https://api.cobli.co/v1/device-vehicle-association/{device_identifier}'
                             
                             r = requests.patch(url, json={"vehicle_id": None}, headers=headers)
                             
@@ -127,18 +129,22 @@ if st.session_state.dados_planilha is not None:
                                 sucesso += 1
                             else:
                                 falha += 1
-                                logs.append({
-                                    "ID Usado": device_id,
+                                # Captura detalhada do log
+                                logs_lista.append({
+                                    "ID Usado": device_identifier,
                                     "Status": r.status_code,
-                                    "Mensagem da API": r.text[:150]
+                                    "Mensagem da API": r.text[:200]
                                 })
                         
-                        status.update(label=f"Desassociação Finalizada. Sucessos: {sucesso}", state="complete", expanded=False)
+                        status.update(label=f"Processo Finalizado. Sucessos: {sucesso}", state="complete", expanded=False)
                         
+                        # Resultados exibidos fora do st.status para persistência visual
                         with container_desassoc:
-                            if sucesso > 0: st.success(f"✅ {sucesso} dispositivos desvinculados!")
+                            if sucesso > 0: 
+                                st.success(f"✅ {sucesso} dispositivos desvinculados com sucesso!")
                             if falha > 0:
-                                st.error(f"❌ {falha} falhas encontradas.")
-                                st.expander("🔍 Ver Detalhes das Falhas").table(pd.DataFrame(logs))
+                                st.error(f"❌ {falha} falhas encontradas durante a desassociação.")
+                                with st.expander("🔍 Ver Detalhes das Falhas", expanded=True):
+                                    st.table(pd.DataFrame(logs_lista))
                     else:
-                        st.error("Credenciais inválidas.")
+                        st.error("Credenciais inválidas. Verifique sua senha API.")
