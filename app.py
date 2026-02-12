@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 SHEET_URL_READ = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRirnHsHNFNULPC-fq3JyULMJT0ImV4f6ojJwblaL2CxeKQf7erAoGwCYF7hce8hiDB68WqD_9QcLcM/pub?output=csv"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyCwT5_FsR4MqsYTuoLLuQd8tOZLBXPPsNZIcpNyO-7aZpFtN5u6YLvP3cv-YBSewznpw/exec"
 SESSION_TIMEOUT = 3600 
-ID_BASE_COBLI = "12768cf5-e959-4f2a-a804-e0f8bbdcaeeb"
+ID_BASE_COBLI = "12768cf5-e959-4f2a-a804-e0f8bbdcaeeb" #
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerenciador Cobli", layout="centered")
@@ -46,34 +46,44 @@ if not st.session_state.autenticado:
             st.error("Acesso negado")
     st.stop()
 
-# --- 4. FUNÇÃO DE PROCESSAMENTO ---
+# --- 4. FUNÇÃO DE NORMALIZAÇÃO PARA COMPARAÇÃO ---
+def normalizar_id(id_string):
+    """Remove traços, espaços e converte para minúsculo para garantir comparação idêntica."""
+    return str(id_string).strip().lower().replace("-", "")
+
+# --- 5. FUNÇÃO DE PROCESSAMENTO ---
 def processar_dispositivo(row, token, user_email):
     imei_alvo = str(row['imei']).strip()
-    fleet_alvo = str(row['fleet_id']).strip().lower()
+    fleet_alvo = str(row['fleet_id']).strip()
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
-    nota = f"Ferramenta Python - Usuario: {user_email}"
+    nota = f"Ferramenta Python - Usuario: {user_email}" #
 
     try:
         # Consulta de situação atual na API
         check = requests.get(f'https://api.cobli.co/v1/devices?imei={imei_alvo}', headers=headers, timeout=10)
         if check.status_code == 200:
             dados = check.json()
-            if dados and len(dados) > 0:
-                fleet_atual = str(dados[0].get('fleet_id')).strip().lower()
+            if dados and isinstance(dados, list) and len(dados) > 0:
+                fleet_atual = str(dados[0].get('fleet_id', '')).strip()
                 
-                # SE JÁ ESTÁ NA FROTA ALVO: Retorna a mensagem conforme solicitado
-                if fleet_atual == fleet_alvo:
+                # NORMALIZAÇÃO PARA COMPARAÇÃO REAL
+                frota_api_limpa = normalizar_id(fleet_atual)
+                frota_planilha_limpa = normalizar_id(fleet_alvo)
+                frota_base_limpa = normalizar_id(ID_BASE_COBLI)
+
+                # SE JÁ ESTÁ NA FROTA ALVO: Retorna a mensagem solicitada
+                if frota_api_limpa == frota_planilha_limpa:
                     return {"imei": imei_alvo, "res": "Aviso", "msg": "Dispositivo já conta associado"}
                 
-                # SE ESTÁ NA BASE COBLI OU É NOVO: Permite a associação direta
-                elif fleet_atual == ID_BASE_COBLI.lower():
+                # SE ESTÁ NA BASE OU É NOVO: Permite seguir
+                elif frota_api_limpa == frota_base_limpa:
                     pass 
                 
-                # SE ESTÁ EM OUTRA FROTA REAL: Bloqueio de segurança para evitar trocas acidentais
+                # SE ESTÁ EM OUTRA FROTA REAL: Bloqueio de segurança
                 else:
                     return {"imei": imei_alvo, "res": "Falha", "msg": f"Bloqueado: associado a frota {fleet_atual}"}
 
-        # Execução da Importação/Associação
+        # Execução da Associação
         payload = [{
             "id": str(row['id']), "imei": imei_alvo, "cobli_id": str(row['cobli_id']),
             "type": str(row['type']), "icc_id": str(row['icc_id']),
@@ -88,7 +98,7 @@ def processar_dispositivo(row, token, user_email):
     except:
         return {"imei": imei_alvo, "res": "Erro", "msg": "Timeout de conexao"}
 
-# --- 5. PAINEL PRINCIPAL ---
+# --- 6. PAINEL PRINCIPAL ---
 try: st.image("logo.png", width=220)
 except: pass
 st.title("Cadastro de Dispositivos - Cobli")
@@ -110,7 +120,7 @@ if 'dados_planilha' in st.session_state and st.session_state.dados_planilha is n
     container_resultados = st.empty()
 
     if st.button("INICIAR CADASTRO EM MASSA", use_container_width=True, type="primary"):
-        with st.status("Processando...", expanded=True) as status:
+        with st.status("Validando frotas e processando...", expanded=True) as status:
             data_atual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             token_fixo = st.session_state.token
             user_fixo = st.session_state.user_email
@@ -122,7 +132,7 @@ if 'dados_planilha' in st.session_state and st.session_state.dados_planilha is n
             for res in resultados:
                 logs_nuvem.append({"data_hora": data_atual, "imei": res["imei"], "resultado": res["res"], "mensagem": res["msg"], "nota": f"Ferramenta Python - Usuario: {user_fixo}"})
 
-            # Gravação automática no Google Sheets via URL do Apps Script
+            # Gravação via Apps Script
             requests.post(APPS_SCRIPT_URL, json=logs_nuvem, timeout=15)
             status.update(label="Processo concluído", state="complete")
             
