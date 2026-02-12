@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 SHEET_URL_READ = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRirnHsHNFNULPC-fq3JyULMJT0ImV4f6ojJwblaL2CxeKQf7erAoGwCYF7hce8hiDB68WqD_9QcLcM/pub?output=csv"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyCwT5_FsR4MqsYTuoLLuQd8tOZLBXPPsNZIcpNyO-7aZpFtN5u6YLvP3cv-YBSewznpw/exec"
 SESSION_TIMEOUT = 3600 
-ID_BASE_COBLI = "12768cf5-e959-4f2a-a804-e0f8bbdcaeeb" # Frota ignorada pela trava
+ID_BASE_COBLI = "12768cf5-e959-4f2a-a804-e0f8bbdcaeeb"
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerenciador Cobli", layout="centered")
@@ -46,34 +46,34 @@ if not st.session_state.autenticado:
             st.error("Acesso negado")
     st.stop()
 
-# --- 4. FUNÇÃO DE PROCESSAMENTO COM EXCEÇÃO PARA BASE COBLI ---
+# --- 4. FUNÇÃO DE PROCESSAMENTO ---
 def processar_dispositivo(row, token, user_email):
-    imei_alvo = str(row['imei'])
-    fleet_alvo = str(row['fleet_id'])
+    imei_alvo = str(row['imei']).strip()
+    fleet_alvo = str(row['fleet_id']).strip().lower()
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
-    nota = f"Ferramenta Python - Usuario: {user_email}" # Rastreabilidade
+    nota = f"Ferramenta Python - Usuario: {user_email}"
 
     try:
-        # Consulta de frota atual
+        # Consulta de situação atual na API
         check = requests.get(f'https://api.cobli.co/v1/devices?imei={imei_alvo}', headers=headers, timeout=10)
         if check.status_code == 200:
             dados = check.json()
             if dados and len(dados) > 0:
-                fleet_atual = str(dados[0].get('fleet_id'))
+                fleet_atual = str(dados[0].get('fleet_id')).strip().lower()
                 
-                # SE JÁ ESTÁ NA FROTA ALVO: Aviso
+                # SE JÁ ESTÁ NA FROTA ALVO: Retorna a mensagem conforme solicitado
                 if fleet_atual == fleet_alvo:
-                    return {"imei": imei_alvo, "res": "Aviso", "msg": "Ja associado a esta frota"}
+                    return {"imei": imei_alvo, "res": "Aviso", "msg": "Dispositivo já conta associado"}
                 
-                # SE ESTÁ NA BASE COBLI OU É NOVO: Permite seguir para a associação
-                elif fleet_atual == ID_BASE_COBLI:
+                # SE ESTÁ NA BASE COBLI OU É NOVO: Permite a associação direta
+                elif fleet_atual == ID_BASE_COBLI.lower():
                     pass 
                 
-                # SE ESTÁ EM QUALQUER OUTRA FROTA REAL: Bloqueio
+                # SE ESTÁ EM OUTRA FROTA REAL: Bloqueio de segurança para evitar trocas acidentais
                 else:
                     return {"imei": imei_alvo, "res": "Falha", "msg": f"Bloqueado: associado a frota {fleet_atual}"}
 
-        # Importação / Vínculo
+        # Execução da Importação/Associação
         payload = [{
             "id": str(row['id']), "imei": imei_alvo, "cobli_id": str(row['cobli_id']),
             "type": str(row['type']), "icc_id": str(row['icc_id']),
@@ -82,10 +82,11 @@ def processar_dispositivo(row, token, user_email):
         }]
         
         r = requests.post('https://api.cobli.co/v1/devices-import', json=payload, headers=headers, timeout=10)
-        if r.status_code in [200, 201]: return {"imei": imei_alvo, "res": "Sucesso", "msg": "Associacao realizada"}
+        if r.status_code in [200, 201]: 
+            return {"imei": imei_alvo, "res": "Sucesso", "msg": "Associacao realizada"}
         return {"imei": imei_alvo, "res": "Falha", "msg": f"Erro API {r.status_code}"}
     except:
-        return {"imei": imei_alvo, "res": "Erro", "msg": "Timeout"}
+        return {"imei": imei_alvo, "res": "Erro", "msg": "Timeout de conexao"}
 
 # --- 5. PAINEL PRINCIPAL ---
 try: st.image("logo.png", width=220)
@@ -121,6 +122,7 @@ if 'dados_planilha' in st.session_state and st.session_state.dados_planilha is n
             for res in resultados:
                 logs_nuvem.append({"data_hora": data_atual, "imei": res["imei"], "resultado": res["res"], "mensagem": res["msg"], "nota": f"Ferramenta Python - Usuario: {user_fixo}"})
 
+            # Gravação automática no Google Sheets via URL do Apps Script
             requests.post(APPS_SCRIPT_URL, json=logs_nuvem, timeout=15)
             status.update(label="Processo concluído", state="complete")
             
