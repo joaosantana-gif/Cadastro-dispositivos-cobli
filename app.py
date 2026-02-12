@@ -2,16 +2,13 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-import re
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
-# --- CONFIGURAÇÕES ---
+# --- CONFIGURAÇÕES FIXAS ---
 SHEET_URL_READ = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRirnHsHNFNULPC-fq3JyULMJT0ImV4f6ojJwblaL2CxeKQf7erAoGwCYF7hce8hiDB68WqD_9QcLcM/pub?output=csv"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyCwT5_FsR4MqsYTuoLLuQd8tOZLBXPPsNZIcpNyO-7aZpFtN5u6YLvP3cv-YBSewznpw/exec"
 SESSION_TIMEOUT = 3600 
-# ID da Base/Estoque da Cobli (ignorada pela trava)
-ID_BASE_COBLI = "12768cf5-e959-4f2a-a804-e0f8bbdcaeeb" #
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerenciador Cobli", layout="centered")
@@ -21,7 +18,7 @@ if 'autenticado' not in st.session_state:
 if 'login_time' not in st.session_state:
     st.session_state.login_time = 0
 
-# --- 2. CONTROLE DE ACESSO ---
+# --- 2. CONTROLE DE SESSÃO ---
 if st.session_state.autenticado:
     if (time.time() - st.session_state.login_time) > SESSION_TIMEOUT:
         st.session_state.clear()
@@ -48,56 +45,43 @@ if not st.session_state.autenticado:
             st.error("Acesso negado")
     st.stop()
 
-# --- 4. FUNÇÃO DE LIMPEZA DE ID (GARANTE COMPARAÇÃO EXATA) ---
-def limpar_id(id_string):
-    """Remove tudo que não for letra ou número para evitar falhas de comparação."""
-    return re.sub(r'[^a-zA-Z0-9]', '', str(id_string)).lower()
-
-# --- 5. FUNÇÃO DE PROCESSAMENTO ---
+# --- 4. FUNÇÃO DE PROCESSAMENTO DIRETO ---
 def processar_dispositivo(row, token, user_email):
     imei_alvo = str(row['imei']).strip()
-    fleet_alvo_original = str(row['fleet_id']).strip()
-    fleet_alvo_limpo = limpar_id(fleet_alvo_original)
-    base_limpa = limpar_id(ID_BASE_COBLI)
-    
+    fleet_alvo = str(row['fleet_id']).strip()
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
-    nota_audit = f"Ferramenta Python - Usuario: {user_email}" #
+    nota_audit = f"Ferramenta Python - Usuario: {user_email}"
+
+    # Payload para importação direta sem checagem prévia
+    payload = [{
+        "id": str(row['id']), 
+        "imei": imei_alvo, 
+        "cobli_id": str(row['cobli_id']),
+        "type": str(row['type']), 
+        "icc_id": str(row['icc_id']),
+        "chip_number": str(row['chip_number']), 
+        "chip_operator": str(row['chip_operator']),
+        "fleet_id": fleet_alvo, 
+        "note": nota_audit
+    }]
 
     try:
-        # Consulta de frota atual na Cobli
-        check = requests.get(f'https://api.cobli.co/v1/devices?imei={imei_alvo}', headers=headers, timeout=10)
-        
-        if check.status_code == 200:
-            dados = check.json()
-            if dados and isinstance(dados, list) and len(dados) > 0:
-                fleet_atual_limpo = limpar_id(dados[0].get('fleet_id', ''))
-                
-                # CASO 1: JÁ ESTÁ NA FROTA CERTA (Apenas aviso com texto combinado)
-                if fleet_atual_limpo == fleet_alvo_limpo:
-                    return {"imei": imei_alvo, "res": "Aviso", "msg": "Dispositivo já conta associado"} #
-                
-                # CASO 2: ESTÁ EM OUTRA FROTA REAL (Bloqueio de segurança)
-                elif fleet_atual_limpo != base_limpa:
-                    return {"imei": imei_alvo, "res": "Falha", "msg": f"Bloqueado: associado a frota {dados[0].get('fleet_id')}"} #
-
-        # CASO 3: ESTÁ NA BASE OU É NOVO (Realiza a associação)
-        payload = [{
-            "id": str(row['id']), "imei": imei_alvo, "cobli_id": str(row['cobli_id']),
-            "type": str(row['type']), "icc_id": str(row['icc_id']),
-            "chip_number": str(row['chip_number']), "chip_operator": str(row['chip_operator']),
-            "fleet_id": fleet_alvo_original, "note": nota_audit
-        }]
-        
-        r = requests.post('https://api.cobli.co/v1/devices-import', json=payload, headers=headers, timeout=10)
+        r = requests.post('https://api.cobli.co/v1/devices-import', json=payload, headers=headers, timeout=12)
         
         if r.status_code in [200, 201]:
-            return {"imei": imei_alvo, "res": "Sucesso", "msg": "Associacao realizada"} #
-        return {"imei": imei_alvo, "res": "Falha", "msg": f"Erro API {r.status_code}"}
+            return {"imei": imei_alvo, "res": "Sucesso", "msg": "Associacao realizada"}
         
-    except:
-        return {"imei": imei_alvo, "res": "Erro", "msg": "Sem resposta"}
+        elif r.status_code == 409:
+            # Tradução para a mensagem solicitada em caso de conflito na API
+            return {"imei": imei_alvo, "res": "Aviso", "msg": "Dispositivo já conta associado"}
+        
+        else:
+            return {"imei": imei_alvo, "res": "Falha", "msg": f"Erro {r.status_code}"}
 
-# --- 6. PAINEL PRINCIPAL ---
+    except:
+        return {"imei": imei_alvo, "res": "Erro", "msg": "Sem resposta da API"}
+
+# --- 5. PAINEL PRINCIPAL ---
 try: st.image("logo.png", width=220)
 except: pass
 st.title("Cadastro de Dispositivos - Cobli")
@@ -119,7 +103,7 @@ if 'dados_planilha' in st.session_state and st.session_state.dados_planilha is n
     container_resultados = st.empty()
 
     if st.button("INICIAR CADASTRO EM MASSA", use_container_width=True, type="primary"):
-        with st.status("Processando...", expanded=True) as status:
+        with st.status("Processando associações...", expanded=True) as status:
             data_atual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             t_fixo, u_fixo = st.session_state.token, st.session_state.user_email
             
@@ -129,15 +113,18 @@ if 'dados_planilha' in st.session_state and st.session_state.dados_planilha is n
             logs_nuvem = []
             for res in resultados:
                 logs_nuvem.append({
-                    "data_hora": data_atual, "imei": res["imei"],
-                    "resultado": res["res"], "mensagem": res["msg"], "nota": f"Ferramenta Python - Usuario: {u_fixo}"
+                    "data_hora": data_atual, 
+                    "imei": res["imei"], 
+                    "resultado": res["res"], 
+                    "mensagem": res["msg"], 
+                    "nota": f"Ferramenta Python - Usuario: {u_fixo}"
                 })
 
-            # Gravação no Google Sheets
+            # Envio de logs para a nuvem
             requests.post(APPS_SCRIPT_URL, json=logs_nuvem, timeout=15)
-            status.update(label="Processo concluído", state="complete")
+            status.update(label="Processamento finalizado", state="complete")
             
             with container_resultados.container():
                 st.divider()
-                st.write("Relatório da Sessão (Sincronizado com Nuvem)")
+                st.write("Relatório da Sessão")
                 st.dataframe(pd.DataFrame(logs_nuvem), use_container_width=True, hide_index=True)
