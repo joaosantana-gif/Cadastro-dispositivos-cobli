@@ -5,17 +5,17 @@ import requests
 # URL da sua planilha Google
 SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRirnHsHNFNULPC-fq3JyULMJT0ImV4f6ojJwblaL2CxeKQf7erAoGwCYF7hce8hiDB68WqD_9QcLcM/pub?output=csv"
 
-# --- 1. CONFIGURAÇÃO DA PÁGINA ---
+# --- 1. CONFIGURACAO DA PAGINA ---
 st.set_page_config(page_title="Gerenciador Cobli", layout="centered")
 
-# --- 2. LOGO E TÍTULO ---
+# --- 2. LOGO E TITULO ---
 try:
     st.image("logo.png", width=220)
 except:
     pass
 
 st.title("Cadastro de Dispositivos - Cobli")
-st.caption("Sistema de Importação Direta e Rastreabilidade")
+st.caption("Sistema de Importacao Direta e Rastreabilidade")
 st.divider()
 
 # --- 3. BARRA LATERAL ---
@@ -23,7 +23,7 @@ st.sidebar.header("Acesso ao Sistema")
 email = st.sidebar.text_input("E-mail Cobli", value="joao.santana@cobli.co").strip()
 password = st.sidebar.text_input("Senha", type="password").strip()
 
-if st.sidebar.button("Limpar Sessão"):
+if st.sidebar.button("Limpar Sessao"):
     st.session_state.clear()
     st.rerun()
 
@@ -36,7 +36,7 @@ if st.button("Sincronizar Planilha Google", use_container_width=True):
         st.session_state.dados_planilha = pd.read_csv(SHEET_URL)
         st.toast("Dados sincronizados")
     except Exception as e:
-        st.error(f"Erro na sincronização: {e}")
+        st.error(f"Erro na sincronizacao: {e}")
 
 # --- 5. PROCESSAMENTO ---
 if st.session_state.dados_planilha is not None:
@@ -44,7 +44,6 @@ if st.session_state.dados_planilha is not None:
     st.write(f"Itens na fila: {len(df)}")
     st.dataframe(df, use_container_width=True, hide_index=True)
     
-    # Placeholders para manter os resultados visíveis após o fim do processo
     container_resultados = st.empty()
 
     if st.button("INICIAR CADASTRO EM MASSA", use_container_width=True, type="primary"):
@@ -63,10 +62,8 @@ if st.session_state.dados_planilha is not None:
 
                     for idx, row in df.iterrows():
                         imei_alvo = str(row['imei'])
-                        # Rastreabilidade para auditoria interna
-                        nota_auditoria = f"Ferramenta Python - Usuario: {email}"
+                        nota_auditoria = f"Ferramenta Python - Usuario: {email}" # Mantendo rastreabilidade
                         
-                        # Payload para importação/vínculo
                         payload = [{
                             "id": str(row['id']), 
                             "imei": imei_alvo, 
@@ -80,37 +77,43 @@ if st.session_state.dados_planilha is not None:
                         }]
 
                         try:
-                            # Dispara o import para garantir que o vínculo seja criado no painel
                             r = requests.post('https://api.cobli.co/v1/devices-import', json=payload, headers=headers, timeout=15)
                             
+                            # Traducao dos codigos de erro para mensagens reais
                             if r.status_code in [200, 201]:
                                 sucesso += 1
-                                logs_execucao.append({
-                                    "IMEI": imei_alvo, 
-                                    "Resultado": "Sucesso", 
-                                    "Mensagem": "Dispositivo processado", 
-                                    "Nota": nota_auditoria
-                                })
+                                msg_api = "Sucesso na associacao"
+                                resultado_texto = "Sucesso"
+                            elif r.status_code == 409:
+                                falha += 1
+                                msg_api = "Dispositivo ja consta associado"
+                                resultado_texto = "Falha"
+                            elif r.status_code == 400:
+                                falha += 1
+                                msg_api = "Dados invalidos (Verifique Fleet ID ou IMEI)"
+                                resultado_texto = "Falha"
                             else:
                                 falha += 1
-                                logs_execucao.append({
-                                    "IMEI": imei_alvo, 
-                                    "Resultado": "Falha", 
-                                    "Mensagem": f"Codigo {r.status_code}", 
-                                    "Nota": nota_auditoria
-                                })
+                                msg_api = f"Erro inesperado ({r.status_code})"
+                                resultado_texto = "Falha"
+
+                            logs_execucao.append({
+                                "IMEI": imei_alvo, 
+                                "Resultado": resultado_texto, 
+                                "Mensagem": msg_api, 
+                                "Nota": nota_auditoria
+                            })
                         except:
                             falha += 1
                             logs_execucao.append({
                                 "IMEI": imei_alvo, 
                                 "Resultado": "Erro", 
-                                "Mensagem": "Timeout de conexao", 
+                                "Mensagem": "Sem resposta do servidor", 
                                 "Nota": nota_auditoria
                             })
 
-                    status.update(label=f"Processamento concluído: {sucesso} Sucessos", state="complete")
+                    status.update(label=f"Processamento concluido: {sucesso} Sucessos", state="complete")
 
-                    # Exibição do Log e Botão de Download
                     with container_resultados.container():
                         st.divider()
                         st.write("Log Detalhado")
@@ -119,11 +122,11 @@ if st.session_state.dados_planilha is not None:
                         
                         csv_data = log_df.to_csv(index=False).encode('utf-8')
                         st.download_button(
-                            label="Baixar Log de Execução (CSV)",
+                            label="Baixar Log de Execucao (CSV)",
                             data=csv_data,
                             file_name="log_cobli.csv",
                             mime="text/csv",
                             use_container_width=True
                         )
                 else:
-                    st.error("Falha na autenticação")
+                    st.error("Falha na autenticacao")
