@@ -7,7 +7,7 @@ from datetime import datetime
 # --- CONFIGURAÇÕES DE INTEGRAÇÃO ---
 SHEET_URL_READ = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRirnHsHNFNULPC-fq3JyULMJT0ImV4f6ojJwblaL2CxeKQf7erAoGwCYF7hce8hiDB68WqD_9QcLcM/pub?output=csv"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyCwT5_FsR4MqsYTuoLLuQd8tOZLBXPPsNZIcpNyO-7aZpFtN5u6YLvP3cv-YBSewznpw/exec"
-SESSION_TIMEOUT = 10  # Tempo em segundos (3600s = 1 hora)
+SESSION_TIMEOUT = 3600  # Tempo em segundos (3600s = 1 hora)
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerenciador Cobli", layout="centered")
