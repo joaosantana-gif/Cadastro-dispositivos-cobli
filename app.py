@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import requests
@@ -7,13 +6,14 @@ import re
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
-# --- CONFIGURACOES FIXAS ---
+# --- CONFIGURAÇÕES ---
 SHEET_URL_READ = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRirnHsHNFNULPC-fq3JyULMJT0ImV4f6ojJwblaL2CxeKQf7erAoGwCYF7hce8hiDB68WqD_9QcLcM/pub?output=csv"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyCwT5_FsR4MqsYTuoLLuQd8tOZLBXPPsNZIcpNyO-7aZpFtN5u6YLvP3cv-YBSewznpw/exec"
 SESSION_TIMEOUT = 3600 
-ID_BASE_COBLI = "12768cf5-e959-4f2a-a804-e0f8bbdcaeeb" # Frota estoque
+# ID da Base/Estoque da Cobli (ignorada pela trava)
+ID_BASE_COBLI = "12768cf5-e959-4f2a-a804-e0f8bbdcaeeb" #
 
-# --- 1. CONFIGURACAO DA PAGINA ---
+# --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerenciador Cobli", layout="centered")
 
 if 'autenticado' not in st.session_state:
@@ -21,7 +21,7 @@ if 'autenticado' not in st.session_state:
 if 'login_time' not in st.session_state:
     st.session_state.login_time = 0
 
-# --- 2. CONTROLO DE SESSAO ---
+# --- 2. CONTROLE DE ACESSO ---
 if st.session_state.autenticado:
     if (time.time() - st.session_state.login_time) > SESSION_TIMEOUT:
         st.session_state.clear()
@@ -48,52 +48,54 @@ if not st.session_state.autenticado:
             st.error("Acesso negado")
     st.stop()
 
-# --- 4. FUNCAO DE LIMPEZA RADICAL DE ID ---
-def limpar_id(texto):
-    """Mantém apenas letras e números para garantir que a comparação nunca falhe."""
-    if not texto: return ""
-    return re.sub(r'[^a-zA-Z0-9]', '', str(texto)).lower()
+# --- 4. FUNÇÃO DE LIMPEZA DE ID (GARANTE COMPARAÇÃO EXATA) ---
+def limpar_id(id_string):
+    """Remove tudo que não for letra ou número para evitar falhas de comparação."""
+    return re.sub(r'[^a-zA-Z0-9]', '', str(id_string)).lower()
 
-# --- 5. FUNCAO DE PROCESSAMENTO ---
+# --- 5. FUNÇÃO DE PROCESSAMENTO ---
 def processar_dispositivo(row, token, user_email):
     imei_alvo = str(row['imei']).strip()
-    fleet_alvo = str(row['fleet_id']).strip()
+    fleet_alvo_original = str(row['fleet_id']).strip()
+    fleet_alvo_limpo = limpar_id(fleet_alvo_original)
+    base_limpa = limpar_id(ID_BASE_COBLI)
+    
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
-    nota_audit = f"Ferramenta Python - Usuario: {user_email}" # Rastreabilidade
+    nota_audit = f"Ferramenta Python - Usuario: {user_email}" #
 
     try:
-        # Consulta de frota atual na API
+        # Consulta de frota atual na Cobli
         check = requests.get(f'https://api.cobli.co/v1/devices?imei={imei_alvo}', headers=headers, timeout=10)
         
         if check.status_code == 200:
             dados = check.json()
-            if dados and len(dados) > 0:
-                fleet_atual = str(dados[0].get('fleet_id', '')).strip()
+            if dados and isinstance(dados, list) and len(dados) > 0:
+                fleet_atual_limpo = limpar_id(dados[0].get('fleet_id', ''))
                 
-                # COMPARAÇÃO BLINDADA: Se forem iguais, retorna a mensagem combinada
-                if limpar_id(fleet_atual) == limpar_id(fleet_alvo):
-                    return {"imei": imei_alvo, "res": "Aviso", "msg": "Dispositivo já conta associado", "nota": nota_audit}
+                # CASO 1: JÁ ESTÁ NA FROTA CERTA (Apenas aviso com texto combinado)
+                if fleet_atual_limpo == fleet_alvo_limpo:
+                    return {"imei": imei_alvo, "res": "Aviso", "msg": "Dispositivo já conta associado"} #
                 
-                # Se estiver em outra frota real (que não seja a base da Cobli), bloqueia
-                elif limpar_id(fleet_atual) != limpar_id(ID_BASE_COBLI):
-                    return {"imei": imei_alvo, "res": "Falha", "msg": f"Bloqueado: associado a frota {fleet_atual}", "nota": nota_audit}
+                # CASO 2: ESTÁ EM OUTRA FROTA REAL (Bloqueio de segurança)
+                elif fleet_atual_limpo != base_limpa:
+                    return {"imei": imei_alvo, "res": "Falha", "msg": f"Bloqueado: associado a frota {dados[0].get('fleet_id')}"} #
 
-        # Realiza a importação se estiver livre ou na base
+        # CASO 3: ESTÁ NA BASE OU É NOVO (Realiza a associação)
         payload = [{
             "id": str(row['id']), "imei": imei_alvo, "cobli_id": str(row['cobli_id']),
             "type": str(row['type']), "icc_id": str(row['icc_id']),
             "chip_number": str(row['chip_number']), "chip_operator": str(row['chip_operator']),
-            "fleet_id": fleet_alvo, "note": nota_audit
+            "fleet_id": fleet_alvo_original, "note": nota_audit
         }]
         
         r = requests.post('https://api.cobli.co/v1/devices-import', json=payload, headers=headers, timeout=10)
         
         if r.status_code in [200, 201]:
-            return {"imei": imei_alvo, "res": "Sucesso", "msg": "Associacao realizada", "nota": nota_audit}
-        return {"imei": imei_alvo, "res": "Falha", "msg": f"Erro API {r.status_code}", "nota": nota_audit}
+            return {"imei": imei_alvo, "res": "Sucesso", "msg": "Associacao realizada"} #
+        return {"imei": imei_alvo, "res": "Falha", "msg": f"Erro API {r.status_code}"}
         
     except:
-        return {"imei": imei_alvo, "res": "Erro", "msg": "Sem resposta", "nota": nota_audit}
+        return {"imei": imei_alvo, "res": "Erro", "msg": "Sem resposta"}
 
 # --- 6. PAINEL PRINCIPAL ---
 try: st.image("logo.png", width=220)
@@ -128,13 +130,14 @@ if 'dados_planilha' in st.session_state and st.session_state.dados_planilha is n
             for res in resultados:
                 logs_nuvem.append({
                     "data_hora": data_atual, "imei": res["imei"],
-                    "resultado": res["res"], "mensagem": res["msg"], "nota": res["nota"]
+                    "resultado": res["res"], "mensagem": res["msg"], "nota": f"Ferramenta Python - Usuario: {u_fixo}"
                 })
 
+            # Gravação no Google Sheets
             requests.post(APPS_SCRIPT_URL, json=logs_nuvem, timeout=15)
             status.update(label="Processo concluído", state="complete")
             
             with container_resultados.container():
                 st.divider()
-                st.write("Relatório da Sessão")
+                st.write("Relatório da Sessão (Sincronizado com Nuvem)")
                 st.dataframe(pd.DataFrame(logs_nuvem), use_container_width=True, hide_index=True)
