@@ -1,7 +1,9 @@
+
 import streamlit as st
 import pandas as pd
 import requests
 import time
+import re
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
@@ -9,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 SHEET_URL_READ = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRirnHsHNFNULPC-fq3JyULMJT0ImV4f6ojJwblaL2CxeKQf7erAoGwCYF7hce8hiDB68WqD_9QcLcM/pub?output=csv"
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyCwT5_FsR4MqsYTuoLLuQd8tOZLBXPPsNZIcpNyO-7aZpFtN5u6YLvP3cv-YBSewznpw/exec"
 SESSION_TIMEOUT = 3600 
-ID_BASE_COBLI = "12768cf5-e959-4f2a-a804-e0f8bbdcaeeb" # Frota de estoque da Cobli
+ID_BASE_COBLI = "12768cf5-e959-4f2a-a804-e0f8bbdcaeeb" # Frota estoque
 
 # --- 1. CONFIGURACAO DA PAGINA ---
 st.set_page_config(page_title="Gerenciador Cobli", layout="centered")
@@ -19,7 +21,7 @@ if 'autenticado' not in st.session_state:
 if 'login_time' not in st.session_state:
     st.session_state.login_time = 0
 
-# --- 2. CONTROLO DE ACESSO E EXPIRACAO ---
+# --- 2. CONTROLO DE SESSAO ---
 if st.session_state.autenticado:
     if (time.time() - st.session_state.login_time) > SESSION_TIMEOUT:
         st.session_state.clear()
@@ -46,9 +48,11 @@ if not st.session_state.autenticado:
             st.error("Acesso negado")
     st.stop()
 
-# --- 4. FUNCAO DE NORMALIZACAO ---
-def normalizar_id(id_val):
-    return str(id_val).strip().lower().replace("-", "")
+# --- 4. FUNCAO DE LIMPEZA RADICAL DE ID ---
+def limpar_id(texto):
+    """Mantém apenas letras e números para garantir que a comparação nunca falhe."""
+    if not texto: return ""
+    return re.sub(r'[^a-zA-Z0-9]', '', str(texto)).lower()
 
 # --- 5. FUNCAO DE PROCESSAMENTO ---
 def processar_dispositivo(row, token, user_email):
@@ -58,7 +62,7 @@ def processar_dispositivo(row, token, user_email):
     nota_audit = f"Ferramenta Python - Usuario: {user_email}" # Rastreabilidade
 
     try:
-        # Verificacao de frota atual na API antes de qualquer acao
+        # Consulta de frota atual na API
         check = requests.get(f'https://api.cobli.co/v1/devices?imei={imei_alvo}', headers=headers, timeout=10)
         
         if check.status_code == 200:
@@ -66,15 +70,15 @@ def processar_dispositivo(row, token, user_email):
             if dados and len(dados) > 0:
                 fleet_atual = str(dados[0].get('fleet_id', '')).strip()
                 
-                # Compara os IDs ignorando tracos e letras maiusculas
-                if normalizar_id(fleet_atual) == normalizar_id(fleet_alvo):
+                # COMPARAÇÃO BLINDADA: Se forem iguais, retorna a mensagem combinada
+                if limpar_id(fleet_atual) == limpar_id(fleet_alvo):
                     return {"imei": imei_alvo, "res": "Aviso", "msg": "Dispositivo já conta associado", "nota": nota_audit}
                 
-                # Se estiver em outra frota que nao seja a base, bloqueia a acao
-                elif normalizar_id(fleet_atual) != normalizar_id(ID_BASE_COBLI):
+                # Se estiver em outra frota real (que não seja a base da Cobli), bloqueia
+                elif limpar_id(fleet_atual) != limpar_id(ID_BASE_COBLI):
                     return {"imei": imei_alvo, "res": "Falha", "msg": f"Bloqueado: associado a frota {fleet_atual}", "nota": nota_audit}
 
-        # Realiza a importacao apenas se for novo ou estiver na base
+        # Realiza a importação se estiver livre ou na base
         payload = [{
             "id": str(row['id']), "imei": imei_alvo, "cobli_id": str(row['cobli_id']),
             "type": str(row['type']), "icc_id": str(row['icc_id']),
@@ -95,7 +99,7 @@ def processar_dispositivo(row, token, user_email):
 try: st.image("logo.png", width=220)
 except: pass
 st.title("Cadastro de Dispositivos - Cobli")
-st.caption(f"Sessao ativa: {st.session_state.user_email}")
+st.caption(f"Sessão ativa: {st.session_state.user_email}")
 st.divider()
 
 if st.sidebar.button("Sair do Sistema"):
@@ -127,11 +131,10 @@ if 'dados_planilha' in st.session_state and st.session_state.dados_planilha is n
                     "resultado": res["res"], "mensagem": res["msg"], "nota": res["nota"]
                 })
 
-            # Sincroniza logs com o Google Sheets via Apps Script URL
             requests.post(APPS_SCRIPT_URL, json=logs_nuvem, timeout=15)
-            status.update(label="Processo concluido", state="complete")
+            status.update(label="Processo concluído", state="complete")
             
             with container_resultados.container():
                 st.divider()
-                st.write("Relatorio da Sessao")
+                st.write("Relatório da Sessão")
                 st.dataframe(pd.DataFrame(logs_nuvem), use_container_width=True, hide_index=True)
