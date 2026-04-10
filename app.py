@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-import re
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
@@ -50,44 +49,67 @@ if not st.session_state.autenticado:
             st.error("Acesso negado. Verifique suas credenciais.") 
     st.stop()
 
-# --- 4. FUNÇÃO DE PROCESSAMENTO COM REGRAS ESTRITAS ---
+# --- 4. FUNÇÃO DE LIMPEZA DE DADOS VAZIOS ---
+def limpar_valor(val):
+    """Trata dados ausentes na planilha para não enviar 'nan' como texto."""
+    if pd.isna(val): return ""
+    texto = str(val).strip()
+    return "" if texto.lower() == 'nan' else texto
+
+# --- 5. FUNÇÃO DE PROCESSAMENTO COM REGRA DE EXCEÇÃO ---
 def processar_dispositivo(row, token, user_email):
-    imei_alvo = str(row['imei']).strip()
-    fleet_planilha = str(row['fleet_id']).strip().lower()
+    imei_alvo = limpar_valor(row.get('imei', ''))
+    cobli_id = limpar_valor(row.get('cobli_id', ''))
+    id_alvo = limpar_valor(row.get('id', ''))
+    fleet_planilha = limpar_valor(row.get('fleet_id', '')).lower()
+    
+    # Identificador para o log (Usa IMEI se existir, caso contrário usa Cobli ID)
+    identificador_log = imei_alvo if imei_alvo else (cobli_id if cobli_id else id_alvo)
+
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
     nota_audit = f"Ferramenta Python - Usuario: {user_email}"
 
     try:
-        check = requests.get(f'https://api.cobli.co/v1/devices?imei={imei_alvo}', headers=headers, timeout=10)
-        if check.status_code == 200:
-            dados = check.json()
-            if dados and len(dados) > 0:
-                fleet_api = str(dados[0].get('fleet_id', '')).strip().lower()
-                
-                if fleet_api == ID_BASE_COBLI.lower():
-                    pass 
-                
-                elif fleet_api == fleet_planilha:
-                    return {"imei": imei_alvo, "res": "Falha", "msg": "Dispositivo já está associado no fleet id informado"} 
-                
-                else:
-                    return {"imei": imei_alvo, "res": "Falha", "msg": "Dispositivo já está associado a outro Fleet ID"} 
+        # Passo 1: Verificar situação atual na API (APENAS SE TIVER IMEI)
+        if imei_alvo:
+            check = requests.get(f'https://api.cobli.co/v1/devices?imei={imei_alvo}', headers=headers, timeout=10)
+            if check.status_code == 200:
+                dados = check.json()
+                if dados and len(dados) > 0:
+                    fleet_api = str(dados[0].get('fleet_id', '')).strip().lower()
+                    
+                    if fleet_api == ID_BASE_COBLI.lower():
+                        pass 
+                    elif fleet_api == fleet_planilha:
+                        return {"imei": identificador_log, "res": "Falha", "msg": "Dispositivo já está associado no fleet id informado"} 
+                    else:
+                        return {"imei": identificador_log, "res": "Falha", "msg": "Dispositivo já está associado a outro Fleet ID"} 
 
-        payload = [{
-            "id": str(row['id']), "imei": imei_alvo, "cobli_id": str(row['cobli_id']),
-            "type": str(row['type']), "icc_id": str(row['icc_id']),
-            "chip_number": str(row['chip_number']), "chip_operator": str(row['chip_operator']),
-            "fleet_id": fleet_planilha, "note": nota_audit
-        }]
+        # Passo 2: Montar o Payload apenas com as colunas que existem
+        dispositivo_payload = {
+            "fleet_id": fleet_planilha,
+            "note": nota_audit
+        }
         
-        r = requests.post('https://api.cobli.co/v1/devices-import', json=payload, headers=headers, timeout=12)
-        if r.status_code in [200, 201]:
-            return {"imei": imei_alvo, "res": "Sucesso", "msg": "Associacao realizada"} 
-        return {"imei": imei_alvo, "res": "Falha", "msg": f"Erro API {r.status_code}"}
-    except:
-        return {"imei": imei_alvo, "res": "Erro", "msg": "Sem resposta da API"}
+        if id_alvo: dispositivo_payload["id"] = id_alvo
+        if imei_alvo: dispositivo_payload["imei"] = imei_alvo
+        if cobli_id: dispositivo_payload["cobli_id"] = cobli_id
+        
+        # Adiciona colunas opcionais apenas se tiverem sido preenchidas na planilha
+        for campo in ['type', 'icc_id', 'chip_number', 'chip_operator']:
+            val = limpar_valor(row.get(campo, ''))
+            if val:
+                dispositivo_payload[campo] = val
 
-# --- 5. PAINEL PRINCIPAL ---
+        # Passo 3: Enviar para API
+        r = requests.post('https://api.cobli.co/v1/devices-import', json=[dispositivo_payload], headers=headers, timeout=12)
+        if r.status_code in [200, 201]:
+            return {"imei": identificador_log, "res": "Sucesso", "msg": "Associacao realizada"} 
+        return {"imei": identificador_log, "res": "Falha", "msg": f"Erro API {r.status_code}"}
+    except:
+        return {"imei": identificador_log, "res": "Erro", "msg": "Sem resposta da API"}
+
+# --- 6. PAINEL PRINCIPAL ---
 try: st.image("logo.png", width=220)
 except: pass
 st.title("Cadastro de Dispositivos - Cobli")
@@ -122,7 +144,7 @@ if 'dados_planilha' in st.session_state and st.session_state.dados_planilha is n
             logs_nuvem = []
             for res in resultados:
                 logs_nuvem.append({
-                    "data_hora": data_atual, "imei": res["imei"], 
+                    "data_hora": data_atual, "imei": res["imei"], # Agora essa coluna mostra o Cobli ID se o IMEI for vazio
                     "resultado": res["res"], "mensagem": res["msg"], 
                     "nota": f"Ferramenta Python - Usuario: {u_fixo}"
                 })
