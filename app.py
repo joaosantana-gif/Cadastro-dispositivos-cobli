@@ -49,12 +49,15 @@ if not st.session_state.autenticado:
             st.error("Acesso negado. Verifique suas credenciais.") 
     st.stop()
 
-# --- 4. FUNÇÃO DE LIMPEZA DE DADOS VAZIOS ---
+# --- 4. FUNÇÃO DE LIMPEZA DE DADOS VAZIOS (ATUALIZADA) ---
 def limpar_valor(val):
-    """Trata dados ausentes na planilha para não enviar 'nan' como texto."""
+    """Destrói dados ausentes ou palavras como 'None' geradas pelo conversor de texto."""
     if pd.isna(val): return ""
     texto = str(val).strip()
-    return "" if texto.lower() == 'nan' else texto
+    # Bloqueia as palavras que o sistema gera quando a célula está vazia
+    if texto.lower() in ['nan', 'none', 'null', '']: 
+        return ""
+    return texto
 
 # --- 5. FUNÇÃO DE PROCESSAMENTO COM REGRA DE EXCEÇÃO ---
 def processar_dispositivo(row, token, user_email):
@@ -85,7 +88,7 @@ def processar_dispositivo(row, token, user_email):
                     else:
                         return {"imei": identificador_log, "res": "Falha", "msg": "Dispositivo já está associado a outro Fleet ID"} 
 
-        # Passo 2: Montar o Payload apenas com as colunas que existem
+        # Passo 2: Montar o Payload apenas com as colunas reais e validadas
         dispositivo_payload = {
             "fleet_id": fleet_planilha,
             "note": nota_audit
@@ -95,7 +98,7 @@ def processar_dispositivo(row, token, user_email):
         if imei_alvo: dispositivo_payload["imei"] = imei_alvo
         if cobli_id: dispositivo_payload["cobli_id"] = cobli_id
         
-        # Adiciona colunas opcionais apenas se tiverem sido preenchidas na planilha
+        # Adiciona colunas opcionais APENAS se não forem "None" ou vazias
         for campo in ['type', 'icc_id', 'chip_number', 'chip_operator']:
             val = limpar_valor(row.get(campo, ''))
             if val:
@@ -144,7 +147,7 @@ if 'dados_planilha' in st.session_state and st.session_state.dados_planilha is n
             logs_nuvem = []
             for res in resultados:
                 logs_nuvem.append({
-                    "data_hora": data_atual, "imei": res["imei"], # Agora essa coluna mostra o Cobli ID se o IMEI for vazio
+                    "data_hora": data_atual, "imei": res["imei"], 
                     "resultado": res["res"], "mensagem": res["msg"], 
                     "nota": f"Ferramenta Python - Usuario: {u_fixo}"
                 })
