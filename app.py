@@ -49,14 +49,11 @@ if not st.session_state.autenticado:
             st.error("Acesso negado. Verifique suas credenciais.") 
     st.stop()
 
-# --- 4. FUNÇÃO DE LIMPEZA DE DADOS VAZIOS (ATUALIZADA) ---
+# --- 4. FUNÇÃO DE LIMPEZA EXTRA DE SEGURANÇA ---
 def limpar_valor(val):
-    """Destrói dados ausentes ou palavras como 'None' geradas pelo conversor de texto."""
     if pd.isna(val): return ""
     texto = str(val).strip()
-    # Bloqueia as palavras que o sistema gera quando a célula está vazia
-    if texto.lower() in ['nan', 'none', 'null', '']: 
-        return ""
+    if texto.lower() in ['nan', 'none', 'null', '']: return ""
     return texto
 
 # --- 5. FUNÇÃO DE PROCESSAMENTO COM REGRA DE EXCEÇÃO ---
@@ -66,9 +63,7 @@ def processar_dispositivo(row, token, user_email):
     id_alvo = limpar_valor(row.get('id', ''))
     fleet_planilha = limpar_valor(row.get('fleet_id', '')).lower()
     
-    # Identificador para o log (Usa IMEI se existir, caso contrário usa Cobli ID)
     identificador_log = imei_alvo if imei_alvo else (cobli_id if cobli_id else id_alvo)
-
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
     nota_audit = f"Ferramenta Python - Usuario: {user_email}"
 
@@ -88,7 +83,7 @@ def processar_dispositivo(row, token, user_email):
                     else:
                         return {"imei": identificador_log, "res": "Falha", "msg": "Dispositivo já está associado a outro Fleet ID"} 
 
-        # Passo 2: Montar o Payload apenas com as colunas reais e validadas
+        # Passo 2: Montar o Payload apenas com colunas preenchidas
         dispositivo_payload = {
             "fleet_id": fleet_planilha,
             "note": nota_audit
@@ -98,7 +93,6 @@ def processar_dispositivo(row, token, user_email):
         if imei_alvo: dispositivo_payload["imei"] = imei_alvo
         if cobli_id: dispositivo_payload["cobli_id"] = cobli_id
         
-        # Adiciona colunas opcionais APENAS se não forem "None" ou vazias
         for campo in ['type', 'icc_id', 'chip_number', 'chip_operator']:
             val = limpar_valor(row.get(campo, ''))
             if val:
@@ -123,9 +117,16 @@ if st.sidebar.button("Sair do Sistema"):
     st.session_state.clear()
     st.rerun()
 
+# --- NOVO BLOCO DE LEITURA COM LIMPEZA VISUAL ---
 if st.button("Sincronizar Planilha Google", use_container_width=True):
     try:
-        st.session_state.dados_planilha = pd.read_csv(SHEET_URL_READ, dtype=str)
+        # Lê tudo como texto para evitar Overflow
+        temp_df = pd.read_csv(SHEET_URL_READ, dtype=str)
+        # Limpa visualmente os espaços nulos gerados pelo Pandas
+        temp_df = temp_df.fillna("")
+        temp_df = temp_df.replace(["None", "nan", "NaN", "null", "NONE", "NAN"], "")
+        
+        st.session_state.dados_planilha = temp_df
         st.toast("Dados sincronizados com sucesso!")
     except Exception as e:
         st.error(f"Erro ao carregar planilha: {e}")
